@@ -1469,8 +1469,11 @@ function ledgerEndDate(start, months) {
 
 const ledgerFmtDate = (d) => d ? `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}` : '';
 
+// 印刷CKあり・未成工事CKありの行だけを取り込む。
+// 印刷CKはあるが未成工事CKが無い行は未成工事用伝票の対象外なので skipped に氏名を集める。
 function parseLedgerWorkbook(wb) {
   const rows = [];
+  const skipped = [];
   for (const sheetName of wb.SheetNames) {
     const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '', raw: true, blankrows: true });
     const hIdx = aoa.findIndex(r => r.some(c => normLedgerHeader(c) === LEDGER_HEADERS.check));
@@ -1484,6 +1487,7 @@ function parseLedgerWorkbook(wb) {
       const get = (key) => col[key] >= 0 ? row[col[key]] : '';
       const str = (key) => String(get(key) ?? '').trim();
       if (!isLedgerChecked(get('check')) || !str('name')) continue;
+      if (!isLedgerChecked(get('misei'))) { skipped.push(str('name')); continue; }
 
       const months = parseInt(str('months')) || 0;
       const start = ledgerToDate(get('start'));
@@ -1493,12 +1497,11 @@ function parseLedgerWorkbook(wb) {
         sheet: sheetName, rowNo: r + 1,
         name: str('name'), from: str('from'), to: str('to'), via: str('via'),
         months, start, end, amount,
-        misei: isLedgerChecked(get('misei')),
         job: str('job'), project: str('project'), note: str('note'),
       });
     }
   }
-  return rows;
+  return { rows, skipped };
 }
 
 // 明細の摘要（1行目から順に転記）:
@@ -1517,8 +1520,7 @@ function ledgerSummaryLines(r) {
 
 function ledgerWarnings(r) {
   const w = [];
-  if (!r.misei) w.push('未成工事CKなし（一般管理費の伝票対象ではないか確認してください）');
-  if (r.misei && !r.job) w.push('工番が未入力です');
+  if (!r.job) w.push('工番が未入力です');
   if (!r.amount) w.push('金額が未入力です');
   if (!r.start || !r.months) w.push('開始日または期間が未入力です');
   return w;
@@ -1536,13 +1538,17 @@ async function onLedgerFileSelected(input) {
   if (!file) return;
   try {
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-    ledgerRows = parseLedgerWorkbook(wb);
+    const { rows, skipped } = parseLedgerWorkbook(wb);
+    ledgerRows = rows;
     ledgerSelectedIdx = ledgerRows.length === 1 ? 0 : -1;
     renderLedgerList();
+    const skippedMsg = skipped.length
+      ? ` ※未成工事CKが無いため取り込まなかった人: ${skipped.join('、')}`
+      : '';
     if (ledgerRows.length === 0) {
-      setLedgerStatus('印刷CKにチェックが入った行がありません。※Excelで編集中の場合は保存してから読み込んでください。', true);
+      setLedgerStatus('印刷CK・未成工事CKの両方にチェックが入った行がありません。※Excelで編集中の場合は保存してから読み込んでください。' + skippedMsg, true);
     } else {
-      setLedgerStatus(`「${file.name}」から ${ledgerRows.length} 件読み込みました。転記する人を選んでください。`);
+      setLedgerStatus(`「${file.name}」から ${ledgerRows.length} 件読み込みました。転記する人を選んでください。` + skippedMsg);
     }
   } catch (e) {
     console.error(e);
