@@ -1501,14 +1501,18 @@ function parseLedgerWorkbook(wb) {
   return rows;
 }
 
-// 摘要: 通勤定期代 東京～新宿（四ツ谷経由） 6ヵ月 2026/8/4～2027/2/3 備考
-function ledgerSummary(r) {
-  const parts = ['通勤定期代'];
-  if (r.from || r.to) parts.push(`${r.from}～${r.to}` + (r.via ? `（${r.via}経由）` : ''));
-  if (r.months) parts.push(`${r.months}ヵ月`);
-  if (r.start || r.end) parts.push(`${ledgerFmtDate(r.start)}～${ledgerFmtDate(r.end)}`);
-  if (r.note) parts.push(r.note);
-  return parts.join(' ');
+// 明細の摘要（1行目から順に転記）:
+//   №1 通勤用定期代
+//   №2 東京～新宿（四ツ谷経由）
+//   №3 2026/8/4～2027/2/3（6ヵ月）
+//   №4 備考（入力がある場合のみ）
+function ledgerSummaryLines(r) {
+  const lines = ['通勤用定期代'];
+  lines.push((r.from || r.to) ? `${r.from}～${r.to}` + (r.via ? `（${r.via}経由）` : '') : '');
+  const period = (r.start || r.end) ? `${ledgerFmtDate(r.start)}～${ledgerFmtDate(r.end)}` : '';
+  lines.push(period + (r.months ? `（${r.months}ヵ月）` : ''));
+  if (r.note) lines.push(r.note);
+  return lines;
 }
 
 function ledgerWarnings(r) {
@@ -1557,7 +1561,7 @@ function renderLedgerList() {
         <input type="radio" name="ledger_pick" ${idx === ledgerSelectedIdx ? 'checked' : ''} onchange="selectLedgerRow(${idx})">
         <span class="ledger-name">${escapeHtml(r.name)}<br><span style="font-weight:400; font-size:11px; color:#889;">${escapeHtml(r.sheet)} ${r.rowNo}行目</span></span>
         <span class="ledger-detail">
-          ${escapeHtml(ledgerSummary(r))}<br>
+          ${ledgerSummaryLines(r).filter(Boolean).map(escapeHtml).join(' ／ ')}<br>
           金額 ¥${r.amount.toLocaleString('ja-JP')}${r.job || r.project ? ` ／ ${escapeHtml(r.job)} ${escapeHtml(r.project)}` : ''}
           ${warns.map(w => `<br><span class="ledger-warn">⚠ ${escapeHtml(w)}</span>`).join('')}
         </span>
@@ -1574,12 +1578,14 @@ function selectLedgerRow(idx) {
 function applyLedgerSelection() {
   const r = ledgerRows[ledgerSelectedIdx];
   if (!r) { alert('転記する人を一覧から選んでください'); return; }
-  const hasInput = ['job_number', 'project_name', 'summary_0', 'payee_0', 'amount_0'].some(id => v(id));
-  if (hasInput && !confirm(`工番・件名・明細1行目の入力内容を「${r.name}」の台帳データで上書きします。よろしいですか？`)) return;
+  const lines = ledgerSummaryLines(r);
+  const summaryIds = lines.map((_, i) => `summary_${i}`);
+  const hasInput = ['job_number', 'project_name', ...summaryIds, 'payee_0', 'amount_0'].some(id => v(id));
+  if (hasInput && !confirm(`工番・件名・明細${lines.length}行目までの摘要などを「${r.name}」の台帳データで上書きします。よろしいですか？`)) return;
 
   document.getElementById('job_number').value = r.job;
   document.getElementById('project_name').value = r.project;
-  document.getElementById('summary_0').value = ledgerSummary(r);
+  lines.forEach((line, i) => { document.getElementById(`summary_${i}`).value = line; });
   document.getElementById('payee_0').value = r.name;
   document.getElementById('amount_0').value = r.amount || '';
   updateTotal();
