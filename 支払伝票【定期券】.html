@@ -248,11 +248,12 @@
   table.detail tr:nth-child(even) td { background: #fafcff; }
   table.detail tr.row-fixed td { background: #f4f7fc; }
   table.detail tr.row-fixed .row-label { font-size: 11px; color: #778; text-align: center; }
-  table.detail td input, table.detail td select {
+  table.detail td input, table.detail td select, table.detail td textarea {
     width: 100%; border: none; background: transparent; padding: 5px 4px;
     font-size: 13px; font-family: inherit;
   }
-  table.detail td input:focus, table.detail td select:focus {
+  table.detail td textarea { resize: none; line-height: 1.3; } /* 摘要などは2行まで改行可（振替伝票と同じ） */
+  table.detail td input:focus, table.detail td select:focus, table.detail td textarea:focus {
     outline: 1px solid #3a7bd5; border-radius: 3px; background: #fffbe6;
   }
   table.detail td.amount-cell input { text-align: right; }
@@ -952,8 +953,8 @@ for (let i = 0; i < NUM_ROWS; i++) {
         <option value="免抜">免抜</option>
       </select>
     </td>
-    <td><input type="text" id="summary_${i}" placeholder=""></td>
-    <td><input type="text" id="payee_${i}" placeholder=""></td>
+    <td><textarea id="summary_${i}" rows="2" placeholder=""></textarea></td>
+    <td><textarea id="payee_${i}" rows="2" placeholder=""></textarea></td>
     <td><input type="text" id="category_${i}" placeholder="" style="width:38px;" oninput="this.value = toHalfWidthAlnum(this.value)"></td>
     <td data-acc><select class="tax-select" id="expense_cd_${i}">${expenseCdOptionsHtml('')}</select></td>
     <td data-acc><input type="text" id="memo_cd_${i}" placeholder=""></td>
@@ -990,7 +991,7 @@ function updateTotal() {
 // ─── フォームクリア ──────────────────────────────────────────
 function clearForm() {
   if (!confirm('入力内容をすべてクリアしますか？')) return;
-  document.querySelectorAll('input, select').forEach(el => { el.value = ''; });
+  document.querySelectorAll('input, select, textarea').forEach(el => { el.value = ''; });
   clearReceipt();
   attachedFiles = [];
   renderAttachedFileList();
@@ -1001,7 +1002,7 @@ function clearForm() {
 // ─── 入力データの保存・読み込み ────────────────────────────
 function collectFormData() {
   const data = { __receiptImages: receiptImages.map(r => r.dataUrl), __attachedFiles: attachedFiles };
-  document.querySelectorAll('.container input, .container select').forEach(el => {
+  document.querySelectorAll('.container input, .container select, .container textarea').forEach(el => {
     if (!el.id) return;
     data[el.id] = (el.type === 'radio' || el.type === 'checkbox') ? el.checked : el.value;
   });
@@ -1240,6 +1241,14 @@ async function generatePDF(withCopy, mode = 'download', batchRows = null) {
       if (cur) lines.push(cur);
       return lines;
     };
+    // 摘要・支払先などの改行入力(\n)を行として分け、各行をさらに幅に応じて折り返す
+    const wrapLinesMulti = (str, formSize, maxWidth) => {
+      let result = [];
+      for (const seg of str.split('\n')) {
+        result = result.concat(measureForm(seg, formSize) > maxWidth ? wrapLines(seg, formSize, maxWidth) : [seg]);
+      }
+      return result;
+    };
 
     const drawAt = (yOffset) => {
       // 文字種別(ASCII/日本語)ごとにフォントを切り替えて1行描画。xPagePtを返す(描画後の右端位置)
@@ -1271,10 +1280,10 @@ async function generatePDF(withCopy, mode = 'download', batchRows = null) {
         const str = String(text);
         const cellHeight = yBottom - yTop;
         let sz = size || fs;
-        let lines = measureForm(str, sz) > maxWidth ? wrapLines(str, sz, maxWidth) : [str];
+        let lines = wrapLinesMulti(str, sz, maxWidth);
         while (lines.length * sz * LINE_GAP > cellHeight && sz > 5) {
           sz -= 0.5;
-          lines = measureForm(str, sz) > maxWidth ? wrapLines(str, sz, maxWidth) : [str];
+          lines = wrapLinesMulti(str, sz, maxWidth);
         }
         const blockHeight = lines.length * sz * LINE_GAP;
         const yCenter = (yTop + yBottom) / 2;
